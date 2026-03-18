@@ -59,6 +59,7 @@ ENV/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+PCS_data_munge.ipynb
 
 # IPython
 profile_default/

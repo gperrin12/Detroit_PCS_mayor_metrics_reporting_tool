@@ -4,10 +4,18 @@ Generate PCS Mayor Metrics report from Smartsheet export data.
 Reads full_export.csv and produces pcs_mayor_metrics.csv with per-year counts
 for both distinct people (SID Number) and rows (cases).
 
+Year attribution per metric:
+  - Registered / Under Review / Open Files: Created year (registration date)
+  - Expunged / Denied: Hearing Date year
+  - Closed-Ineligible / No Michigan Convictions / No Client Response /
+    Client Not Interested: Case Close Date year
+  - Fallback chain when date is missing: sheet name year -> Created year
+
 Usage:
     python generate_metrics_report.py
 """
 
+import re
 import pandas as pd
 
 INPUT_FILE = "full_export.csv"
@@ -32,10 +40,48 @@ OPEN_FILES_SHEETS = [
 DENIED_SHEETS = ["CM 9: Denied"]
 
 
+def extract_sheet_year(sheet_name):
+    """Extract year from sheet name. Returns a single year int or None.
+
+    Single-year sheets like "(2026)" return that year.
+    Range sheets like "(2019-2022)" return None.
+    """
+    if pd.isna(sheet_name):
+        return None
+    if re.search(r"\d{4}\s*[-–]\s*\d{2,4}", sheet_name):
+        return None
+    match = re.search(r"(20\d{2})", sheet_name)
+    return int(match.group(1)) if match else None
+
+
 def load_data(path):
     df = pd.read_csv(path)
-    df["Created"] = pd.to_datetime(df["Created"])
-    df["year"] = df["Created"].dt.year
+    df["Created"] = pd.to_datetime(df["Created"], errors="coerce")
+    df["created_year"] = df["Created"].dt.year
+
+    df["sheet_year"] = df["Sheet Name"].apply(extract_sheet_year)
+
+    has_hearing = "Hearing Date" in df.columns
+    has_close = "Case Close Date" in df.columns
+
+    if has_hearing:
+        df["Hearing Date"] = pd.to_datetime(df["Hearing Date"], errors="coerce")
+        df["hearing_year"] = df["Hearing Date"].dt.year
+    else:
+        df["hearing_year"] = pd.NA
+        print("Warning: 'Hearing Date' column not found — falling back to sheet year / Created year")
+
+    if has_close:
+        df["Case Close Date"] = pd.to_datetime(df["Case Close Date"], errors="coerce")
+        df["close_year"] = df["Case Close Date"].dt.year
+    else:
+        df["close_year"] = pd.NA
+        print("Warning: 'Case Close Date' column not found — falling back to sheet year / Created year")
+
+    fallback = df["sheet_year"].fillna(df["created_year"])
+    df["hearing_metric_year"] = df["hearing_year"].fillna(fallback).astype("Int64")
+    df["close_metric_year"] = df["close_year"].fillna(fallback).astype("Int64")
+
     return df
 
 
@@ -48,87 +94,105 @@ def row_count(df):
     return len(df)
 
 
-def compute_metrics_for_group(group):
-    """Compute all metrics for a single year group (or the full DataFrame for totals)."""
-    metrics = {}
+def compute_metrics_for_year(year, created_grp, hearing_grp, close_grp):
+    """Compute metrics using the appropriate year-grouped data for each metric."""
+    m = {}
 
-    metrics["registered_people"] = people_count(group)
-    metrics["registered_rows"] = row_count(group)
+    m["registered_people"] = people_count(created_grp)
+    m["registered_rows"] = row_count(created_grp)
 
-    under_review = group[group["Sheet Name"].isin(UNDER_REVIEW_SHEETS)]
-    metrics["under_review_people"] = people_count(under_review)
-    metrics["under_review_rows"] = row_count(under_review)
+    under_review = created_grp[created_grp["Sheet Name"].isin(UNDER_REVIEW_SHEETS)]
+    m["under_review_people"] = people_count(under_review)
+    m["under_review_rows"] = row_count(under_review)
 
-    open_files = group[group["Sheet Name"].isin(OPEN_FILES_SHEETS)]
-    metrics["open_files_people"] = people_count(open_files)
-    metrics["open_files_rows"] = row_count(open_files)
+    open_files = created_grp[created_grp["Sheet Name"].isin(OPEN_FILES_SHEETS)]
+    m["open_files_people"] = people_count(open_files)
+    m["open_files_rows"] = row_count(open_files)
 
-    expunged = group[group["Sheet Name"].str.contains("CM 8", na=False)]
-    metrics["expunged_people"] = people_count(expunged)
-    metrics["expunged_rows"] = row_count(expunged)
+    # Hearing Date year metrics
+    expunged = hearing_grp[hearing_grp["Sheet Name"].str.contains("CM 8", na=False)]
+    m["expunged_people"] = people_count(expunged)
+    m["expunged_rows"] = row_count(expunged)
 
     petition = expunged[expunged["Case Status"] == "Expunged"]
-    metrics["expunged_petition_people"] = people_count(petition)
-    metrics["expunged_petition_rows"] = row_count(petition)
+    m["expunged_petition_people"] = people_count(petition)
+    m["expunged_petition_rows"] = row_count(petition)
 
     auto = expunged[expunged["Case Status"] == "Expunged Automatically"]
-    metrics["expunged_auto_people"] = people_count(auto)
-    metrics["expunged_auto_rows"] = row_count(auto)
+    m["expunged_auto_people"] = people_count(auto)
+    m["expunged_auto_rows"] = row_count(auto)
 
-    denied = group[group["Sheet Name"].isin(DENIED_SHEETS)]
-    metrics["denied_people"] = people_count(denied)
-    metrics["denied_rows"] = row_count(denied)
+    denied = hearing_grp[hearing_grp["Sheet Name"].isin(DENIED_SHEETS)]
+    m["denied_people"] = people_count(denied)
+    m["denied_rows"] = row_count(denied)
 
-    closed_ineligible = group[
-        group["Sheet Name"].str.contains("CM 9: Ineligible", na=False)
-        | group["Sheet Name"].str.contains("CM 9: Active Warrant", na=False)
+    # Case Close Date year metrics
+    closed_ineligible = close_grp[
+        close_grp["Sheet Name"].str.contains("CM 9: Ineligible", na=False)
+        | close_grp["Sheet Name"].str.contains("CM 9: Active Warrant", na=False)
     ]
-    metrics["closed_ineligible_people"] = people_count(closed_ineligible)
-    metrics["closed_ineligible_rows"] = row_count(closed_ineligible)
+    m["closed_ineligible_people"] = people_count(closed_ineligible)
+    m["closed_ineligible_rows"] = row_count(closed_ineligible)
 
-    no_mi = group[
-        group["Sheet Name"].str.contains("CM 9: No Michigan Convictions", na=False)
+    no_mi = close_grp[
+        close_grp["Sheet Name"].str.contains("CM 9: No Michigan Convictions", na=False)
     ]
-    metrics["no_michigan_convictions_people"] = people_count(no_mi)
-    metrics["no_michigan_convictions_rows"] = row_count(no_mi)
+    m["no_michigan_convictions_people"] = people_count(no_mi)
+    m["no_michigan_convictions_rows"] = row_count(no_mi)
 
-    no_response = group[
-        group["Sheet Name"].str.contains("CM 9: No Client Response", na=False)
+    no_response = close_grp[
+        close_grp["Sheet Name"].str.contains("CM 9: No Client Response", na=False)
     ]
-    metrics["no_client_response_people"] = people_count(no_response)
-    metrics["no_client_response_rows"] = row_count(no_response)
+    m["no_client_response_people"] = people_count(no_response)
+    m["no_client_response_rows"] = row_count(no_response)
 
-    not_interested = group[
-        group["Sheet Name"].str.contains("CM 9: Client Not Interested", na=False)
+    not_interested = close_grp[
+        close_grp["Sheet Name"].str.contains("CM 9: Client Not Interested", na=False)
     ]
-    metrics["client_not_interested_people"] = people_count(not_interested)
-    metrics["client_not_interested_rows"] = row_count(not_interested)
+    m["client_not_interested_people"] = people_count(not_interested)
+    m["client_not_interested_rows"] = row_count(not_interested)
 
-    exp = metrics["expunged_people"]
-    den = metrics["denied_people"]
+    exp = m["expunged_people"]
+    den = m["denied_people"]
     if exp + den > 0:
-        metrics["expungement_success_rate"] = round(exp / (exp + den), 4)
+        m["expungement_success_rate"] = round(exp / (exp + den), 4)
     else:
-        metrics["expungement_success_rate"] = None
+        m["expungement_success_rate"] = None
 
-    return metrics
+    return m
 
 
 def main():
     df = load_data(INPUT_FILE)
     print(f"Loaded {len(df):,} rows with {df['SID Number'].nunique():,} unique SIDs")
+    print(f"Columns: {list(df.columns[:12])}")
+
+    if "hearing_year" in df.columns:
+        n = df["hearing_year"].notna().sum()
+        print(f"Hearing Date populated: {n:,} / {len(df):,} rows")
+    if "close_year" in df.columns:
+        n = df["close_year"].notna().sum()
+        print(f"Case Close Date populated: {n:,} / {len(df):,} rows")
+
+    all_years = sorted(
+        set(df["created_year"].dropna().astype(int))
+        | set(df["hearing_metric_year"].dropna().astype(int))
+        | set(df["close_metric_year"].dropna().astype(int))
+    )
 
     rows = []
-    for year in sorted(df["year"].dropna().unique()):
+    for year in all_years:
         year_int = int(year)
-        group = df[df["year"] == year]
-        metrics = compute_metrics_for_group(group)
-        metrics["year"] = year_int
-        rows.append(metrics)
-        print(f"  {year_int}: {metrics['registered_people']:,} people, "
-              f"{metrics['registered_rows']:,} rows")
+        created_grp = df[df["created_year"] == year]
+        hearing_grp = df[df["hearing_metric_year"] == year]
+        close_grp = df[df["close_metric_year"] == year]
+        m = compute_metrics_for_year(year_int, created_grp, hearing_grp, close_grp)
+        m["year"] = year_int
+        rows.append(m)
+        print(f"  {year_int}: registered={m['registered_people']:,} people, "
+              f"expunged={m['expunged_rows']:,} rows")
 
-    totals = compute_metrics_for_group(df)
+    totals = compute_metrics_for_year("Total", df, df, df)
     totals["year"] = "Total"
     rows.append(totals)
 
