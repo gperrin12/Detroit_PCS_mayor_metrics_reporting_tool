@@ -101,20 +101,31 @@ def row_count(df):
     return len(df)
 
 
-def compute_metrics_for_year(year, created_grp, hearing_grp, close_grp):
-    """Compute metrics using the appropriate year-grouped data for each metric."""
+def compute_metrics_for_year(year, created_grp, hearing_grp, close_grp,
+                             full_df=None):
+    """Compute metrics using the appropriate year-grouped data for each metric.
+
+    Under Review and Open Files are current-state pipeline snapshots (no year
+    attribution), so they use the full unfiltered dataset when provided.
+    """
     m = {}
 
     m["registered_people"] = people_count(created_grp)
     m["registered_rows"] = row_count(created_grp)
 
-    under_review = created_grp[created_grp["Sheet Name"].isin(UNDER_REVIEW_SHEETS)]
-    m["under_review_people"] = people_count(under_review)
-    m["under_review_rows"] = row_count(under_review)
+    if full_df is not None:
+        under_review = full_df[full_df["Sheet Name"].isin(UNDER_REVIEW_SHEETS)]
+        m["under_review_people"] = people_count(under_review)
+        m["under_review_rows"] = row_count(under_review)
 
-    open_files = created_grp[created_grp["Sheet Name"].isin(OPEN_FILES_SHEETS)]
-    m["open_files_people"] = people_count(open_files)
-    m["open_files_rows"] = row_count(open_files)
+        open_files = full_df[full_df["Sheet Name"].isin(OPEN_FILES_SHEETS)]
+        m["open_files_people"] = people_count(open_files)
+        m["open_files_rows"] = row_count(open_files)
+    else:
+        m["under_review_people"] = None
+        m["under_review_rows"] = None
+        m["open_files_people"] = None
+        m["open_files_rows"] = None
 
     # Hearing Date year metrics
     expunged = hearing_grp[hearing_grp["Sheet Name"].str.contains("CM 8", na=False)]
@@ -187,19 +198,27 @@ def main():
         | set(df["close_metric_year"].dropna().astype(int))
     )
 
+    latest_year = max(all_years)
+
     rows = []
     for year in all_years:
         year_int = int(year)
         created_grp = df[df["created_year"] == year]
         hearing_grp = df[df["hearing_metric_year"] == year]
         close_grp = df[df["close_metric_year"] == year]
-        m = compute_metrics_for_year(year_int, created_grp, hearing_grp, close_grp)
+        is_current = (year_int == latest_year)
+        m = compute_metrics_for_year(
+            year_int, created_grp, hearing_grp, close_grp,
+            full_df=df if is_current else None,
+        )
         m["year"] = year_int
         rows.append(m)
         print(f"  {year_int}: registered={m['registered_people']:,} people, "
-              f"expunged={m['expunged_rows']:,} rows")
+              f"expunged={m['expunged_rows']:,} rows"
+              + (f", under_review={m['under_review_rows']:,} (current pipeline)"
+                 if is_current else ""))
 
-    totals = compute_metrics_for_year("Total", df, df, df)
+    totals = compute_metrics_for_year("Total", df, df, df, full_df=df)
     totals["year"] = "Total"
     rows.append(totals)
 
