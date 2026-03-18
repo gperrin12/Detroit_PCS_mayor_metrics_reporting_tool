@@ -2,10 +2,8 @@
 Pull data from SmartSheets Report via API, deduplicate, and get counts by year.
 
 Usage:
-    export SMARTSHEET_TOKEN="your_token_here"
-    python pull_smartsheet_report.py
-
-Or just run it and paste your token when prompted.
+    1. Add SMARTSHEET_TOKEN to .env file
+    2. python pull_smartsheet_report.py
 """
 
 import os
@@ -22,7 +20,7 @@ REPORT_ID = "8843647500898180"
 def get_token():
     token = os.environ.get("SMARTSHEET_TOKEN")
     if not token:
-        token = input("Enter your SmartSheet API token: ").strip()
+        raise ValueError("SMARTSHEET_TOKEN not found. Add it to the .env file.")
     return token
 
 def fetch_report(token, report_id, page_size=10000):
