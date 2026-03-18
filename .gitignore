@@ -90,6 +90,9 @@ celerybeat.pid
 *.swo
 *~
 
+# Data files
+*.csv
+
 # OS
 .DS_Store
 Thumbs.db
