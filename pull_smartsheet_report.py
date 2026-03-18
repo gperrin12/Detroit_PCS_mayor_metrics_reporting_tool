@@ -34,11 +34,11 @@ def fetch_report(token, report_id, page_size=10000):
     all_rows = []
     column_map = {}
     page = 1
-    total_pages = None
+    total_row_count = None
     
     while True:
         params = {"pageSize": page_size, "page": page}
-        print(f"Fetching page {page}..." + (f" of {total_pages}" if total_pages else ""))
+        print(f"Fetching page {page}...")
         
         response = requests.get(base_url, headers=headers, params=params)
         
@@ -48,24 +48,33 @@ def fetch_report(token, report_id, page_size=10000):
         
         data = response.json()
         
-        # Get column mapping on first page
         if not column_map:
             for col in data.get("columns", []):
                 column_map[col["virtualId"]] = col["title"]
             print(f"Found {len(column_map)} columns: {list(column_map.values())}")
         
         rows = data.get("rows", [])
+        if not rows:
+            break
+        
         all_rows.extend(rows)
         
-        total_pages = data.get("totalPages", 1)
-        total_rows = data.get("totalRowCount", len(all_rows))
-        print(f"  Got {len(rows)} rows (total so far: {len(all_rows)} of {total_rows})")
+        total_row_count = data.get("totalRowCount", total_row_count)
+        total_pages = data.get("totalPages", None)
+        print(f"  Got {len(rows)} rows (total so far: {len(all_rows)}"
+              f"{f' of {total_row_count}' if total_row_count else ''})")
         
-        if page >= total_pages:
+        # Stop if: we've hit totalPages, or fetched all rows, or got a partial page
+        if total_pages and page >= total_pages:
             break
+        if total_row_count and len(all_rows) >= total_row_count:
+            break
+        if len(rows) < page_size:
+            break
+        
         page += 1
     
-    print(f"\nDone! Fetched {len(all_rows)} total rows across {total_pages} page(s).")
+    print(f"\nDone! Fetched {len(all_rows)} total rows across {page} page(s).")
     return all_rows, column_map
 
 def rows_to_dicts(rows, column_map):
@@ -209,7 +218,7 @@ def main():
     deduped = analyze(records)
     
     # Export deduped dataset
-    export_to_csv(deduped, "deduped_2026.csv")
+    export_to_csv(deduped, "deduped_all_years.csv")
 
 if __name__ == "__main__":
     main()
