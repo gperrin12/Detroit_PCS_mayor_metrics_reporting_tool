@@ -2,7 +2,10 @@
 Generate PCS Mayor Metrics report from Smartsheet export data.
 
 Reads full_export.csv and produces pcs_mayor_metrics.csv with per-year counts
-for both distinct people (SID Number) and rows (cases).
+for both distinct people and rows (cases).
+
+People are identified by a composite key of SID Number + Primary (full name)
+to handle rows where SID is missing or "BLANK".
 
 Year attribution per metric:
   - Registered / Under Review / Open Files: Created year (registration date)
@@ -59,6 +62,10 @@ def load_data(path):
     df["Created"] = pd.to_datetime(df["Created"], errors="coerce")
     df["created_year"] = df["Created"].dt.year
 
+    sid = df["SID Number"].fillna("").astype(str).replace("BLANK", "")
+    name = df["Primary"].fillna("").astype(str)
+    df["person_key"] = sid + "|" + name
+
     df["sheet_year"] = df["Sheet Name"].apply(extract_sheet_year)
 
     has_hearing = "Hearing Date" in df.columns
@@ -86,8 +93,8 @@ def load_data(path):
 
 
 def people_count(df):
-    """Distinct SID Numbers (excludes nulls)."""
-    return df["SID Number"].nunique()
+    """Distinct people by composite key (SID Number + Primary name)."""
+    return df["person_key"].nunique()
 
 
 def row_count(df):
@@ -164,7 +171,7 @@ def compute_metrics_for_year(year, created_grp, hearing_grp, close_grp):
 
 def main():
     df = load_data(INPUT_FILE)
-    print(f"Loaded {len(df):,} rows with {df['SID Number'].nunique():,} unique SIDs")
+    print(f"Loaded {len(df):,} rows with {df['person_key'].nunique():,} unique people")
     print(f"Columns: {list(df.columns[:12])}")
 
     if "hearing_year" in df.columns:
