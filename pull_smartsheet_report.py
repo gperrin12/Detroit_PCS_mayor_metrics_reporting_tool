@@ -101,57 +101,49 @@ def export_to_csv(records, filename="smartsheet_export.csv"):
         writer.writerows(records)
     print(f"Exported {len(records)} rows to {filename}")
 
+def make_person_key(record):
+    """Build composite key from SID Number + Primary (full name).
+
+    Treats null and "BLANK" SID values the same so people without
+    a valid SID are still distinguished by name.
+    """
+    sid = record.get("SID Number") or ""
+    if sid == "BLANK":
+        sid = ""
+    name = record.get("Primary") or ""
+    return f"{sid}|{name}"
+
+
 def analyze(records):
-    """Deduplicate on SID Number, show counts by year."""
-    
-    # Find the right column names (they might vary)
+    """Deduplicate on person key (SID Number + Primary), show counts by year."""
+
     sample = records[0] if records else {}
     print(f"\nColumn names found: {list(sample.keys())}")
-    
-    # Try to find SID and date columns
-    sid_col = None
-    date_col = None
-    for col in sample.keys():
-        if "sid" in col.lower():
-            sid_col = col
-        if "created" in col.lower() or "date" in col.lower() or "registered" in col.lower():
-            if not date_col:  # take the first match
+
+    date_col = "Created"
+    if date_col not in sample:
+        for col in sample.keys():
+            if "created" in col.lower():
                 date_col = col
-    
-    print(f"Using SID column: {sid_col}")
+                break
     print(f"Using date column: {date_col}")
-    
-    if not sid_col:
-        print("\nCouldn't auto-detect SID column. Here are the columns:")
-        for i, col in enumerate(sample.keys()):
-            print(f"  {i}: {col} (sample value: {sample[col]})")
-        sid_col = input("Enter the SID column name: ").strip()
-    
-    if not date_col:
-        print("\nCouldn't auto-detect date column. Here are the columns:")
-        for i, col in enumerate(sample.keys()):
-            print(f"  {i}: {col} (sample value: {sample[col]})")
-        date_col = input("Enter the date column name: ").strip()
-    
-    # Extract year from date values
+
     def get_year(val):
         if val is None:
             return None
         val = str(val)
-        # Try common date formats
         for fmt in ["%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d"]:
             try:
                 from datetime import datetime
                 return datetime.strptime(val.split(" ")[0], fmt).year
-            except:
+            except Exception:
                 continue
-        # Last resort: look for a 4-digit year
         import re
         match = re.search(r"20\d{2}", val)
         if match:
             return int(match.group())
         return None
-    
+
     # --- All records (with dupes) ---
     print("\n" + "="*50)
     print("ALL RECORDS (before dedup)")
@@ -160,43 +152,43 @@ def analyze(records):
     for r in records:
         year = get_year(r.get(date_col))
         year_counts_all[year] += 1
-    
+
     for year in sorted(k for k in year_counts_all if k is not None):
         print(f"  {year}: {year_counts_all[year]:,}")
     if None in year_counts_all:
         print(f"  Unknown year: {year_counts_all[None]:,}")
     print(f"  TOTAL: {sum(year_counts_all.values()):,}")
-    
+
     # --- Deduplicated ---
     print("\n" + "="*50)
-    print("DEDUPLICATED (first occurrence per SID Number)")
+    print("DEDUPLICATED (first occurrence per person key)")
     print("="*50)
-    seen_sids = set()
+    seen_keys = set()
     deduped = []
     for r in records:
-        sid = r.get(sid_col)
-        if sid and sid not in seen_sids:
-            seen_sids.add(sid)
+        key = make_person_key(r)
+        if key not in seen_keys:
+            seen_keys.add(key)
             deduped.append(r)
-    
+
     year_counts_deduped = Counter()
     for r in deduped:
         year = get_year(r.get(date_col))
         year_counts_deduped[year] += 1
-    
+
     for year in sorted(k for k in year_counts_deduped if k is not None):
         print(f"  {year}: {year_counts_deduped[year]:,}")
     if None in year_counts_deduped:
         print(f"  Unknown year: {year_counts_deduped[None]:,}")
     print(f"  TOTAL: {sum(year_counts_deduped.values()):,}")
-    
+
     # --- 2026 specifically ---
     print("\n" + "="*50)
     print("2026 ONLY (deduplicated)")
     print("="*50)
     count_2026 = year_counts_deduped.get(2026, 0)
     print(f"  2026 deduplicated count: {count_2026:,}")
-    
+
     return deduped
 
 def main():
