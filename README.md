@@ -53,7 +53,10 @@ Use **Pull from Smartsheet and generate metrics** (one button: fetch + build met
 
    ```toml
    SMARTSHEET_TOKEN = "your_token_here"
+   APP_PASSWORD = "shared_password_for_team"
    ```
+
+   `APP_PASSWORD` is required to open the app when set (same value for everyone who should access it). Omit it only for local development without a login.
 
 4. Deploy. Use the single **Pull from Smartsheet and generate metrics** action; only the metrics CSV is persisted under `data/` for that run.
 
