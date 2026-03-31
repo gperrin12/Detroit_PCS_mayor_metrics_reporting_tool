@@ -4,7 +4,7 @@ Detroit PCS Mayor Metrics — Streamlit app (local + Streamlit Cloud).
 Run locally:  streamlit run streamlit_app.py
 Cloud: set Main file to streamlit_app.py and add SMARTSHEET_TOKEN in Secrets.
 
-Full row-level data is not written to disk; metrics are computed in memory after pull.
+No row-level PII is written to disk; only aggregated metrics CSV after generate.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ st.title("Detroit PCS Mayor Metrics")
 
 st.markdown(
     "Click the button below to fetch the Smartsheet report and build the metrics table in one step "
-    "(row-level data stays **in memory** — no full export CSV). "
+    "(raw rows stay **in memory** only; only the aggregated metrics file is saved). "
     "On **Streamlit Community Cloud**, add `SMARTSHEET_TOKEN` under **App settings → Secrets**."
 )
 

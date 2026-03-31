@@ -1,6 +1,6 @@
 # Detroit PCS Mayor Metrics Reporting Tool
 
-A reporting tool for Detroit PCS mayor metrics: pull a Smartsheet report, deduplicate, and export mayor metrics as CSV. **Full row-level data is not written to disk** (PII); metrics are built in memory after each pull. Includes a **Streamlit** UI for local use and [Streamlit Community Cloud](https://streamlit.io/cloud).
+A reporting tool for Detroit PCS mayor metrics: pull a Smartsheet report and export **aggregated** mayor metrics as CSV only. **No row-level or identifiable export is written to disk**; raw rows exist only in memory during a run. Includes a **Streamlit** UI for local use and [Streamlit Community Cloud](https://streamlit.io/cloud).
 
 ## Layout
 
@@ -8,8 +8,7 @@ A reporting tool for Detroit PCS mayor metrics: pull a Smartsheet report, dedupl
 ├── streamlit_app.py      # Streamlit entrypoint (set this on Cloud)
 ├── requirements.txt
 ├── data/                 # Outputs (gitignored except .gitkeep)
-│   ├── deduped_all_years.csv   # optional deduped export from pull
-│   └── pcs_mayor_metrics.csv   # aggregated metrics only
+│   └── pcs_mayor_metrics.csv   # aggregated metrics only (no PII export)
 └── analysis/
     ├── paths.py
     ├── pull_smartsheet_report.py
@@ -44,7 +43,7 @@ From the project root:
 streamlit run streamlit_app.py
 ```
 
-Use **Pull from Smartsheet and generate metrics** (one button: fetch + build metrics; rows stay in session memory only). There is no download for a full raw export.
+Use **Pull from Smartsheet and generate metrics** (one button: fetch + build metrics; row-level data is not persisted as CSV).
 
 ## Streamlit Community Cloud
 
@@ -66,7 +65,7 @@ Run from the **project root**:
 python -m analysis.pull_smartsheet_report
 ```
 
-This fetches the report, writes `data/deduped_all_years.csv`, builds metrics **in memory**, and writes `data/pcs_mayor_metrics.csv`. It does **not** write a full row-level CSV.
+This fetches the report, builds metrics **in memory**, and writes only `data/pcs_mayor_metrics.csv` (aggregated counts — no row-level or deduped CSV).
 
 To build metrics from a **local CSV** (development only):
 
