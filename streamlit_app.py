@@ -37,41 +37,33 @@ st.set_page_config(page_title="PCS Mayor Metrics", layout="wide")
 st.title("Detroit PCS Mayor Metrics")
 
 st.markdown(
-    "Pull the Smartsheet report (data stays **in memory** — no full export CSV), "
-    "then generate the aggregated metrics table. "
+    "Click the button below to fetch the Smartsheet report and build the metrics table in one step "
+    "(row-level data stays **in memory** — no full export CSV). "
     "On **Streamlit Community Cloud**, add `SMARTSHEET_TOKEN` under **App settings → Secrets**."
 )
 
 has_token = bool(os.environ.get("SMARTSHEET_TOKEN"))
 if not has_token:
-    st.warning("No `SMARTSHEET_TOKEN` in environment or secrets — pull will fail until it is set.")
+    st.warning("No `SMARTSHEET_TOKEN` in environment or secrets — the app cannot fetch data until it is set.")
 
-c1, c2 = st.columns(2)
-
-with c1:
-    if st.button("Pull data from Smartsheet", type="primary", disabled=not has_token):
-        with st.spinner("Fetching report..."):
-            ok, msg, records = run_pull_data()
-        if ok:
-            st.session_state[SESSION_RECORDS_KEY] = records
-            st.success(msg)
-        else:
+if st.button(
+    "Pull from Smartsheet and generate metrics",
+    type="primary",
+    disabled=not has_token,
+):
+    with st.spinner("Fetching report and computing metrics..."):
+        ok, msg, records = run_pull_data()
+        if not ok:
             st.session_state.pop(SESSION_RECORDS_KEY, None)
             st.error(msg)
-
-with c2:
-    if st.button("Generate metrics"):
-        records = st.session_state.get(SESSION_RECORDS_KEY)
-        if not records:
-            st.error("Run **Pull data** first in this session (full export is not stored on disk).")
         else:
-            with st.spinner("Computing metrics..."):
-                try:
-                    run_generate_metrics(records)
-                    st.success(f"Saved `{PCS_MAYOR_METRICS_CSV.name}`.")
-                    st.rerun()
-                except Exception as e:
-                    st.exception(e)
+            st.session_state[SESSION_RECORDS_KEY] = records
+            try:
+                run_generate_metrics(records)
+                st.success(f"{msg} Saved `{PCS_MAYOR_METRICS_CSV.name}`.")
+                st.rerun()
+            except Exception as e:
+                st.exception(e)
 
 st.divider()
 st.subheader("Download")
@@ -86,4 +78,4 @@ if PCS_MAYOR_METRICS_CSV.exists():
     st.subheader("Metrics preview")
     st.dataframe(pd.read_csv(PCS_MAYOR_METRICS_CSV), use_container_width=True)
 else:
-    st.caption(f"`{PCS_MAYOR_METRICS_CSV.name}` not yet created.")
+    st.caption(f"`{PCS_MAYOR_METRICS_CSV.name}` not yet created — run the button above.")

@@ -44,7 +44,7 @@ From the project root:
 streamlit run streamlit_app.py
 ```
 
-Use **Pull data** (stores rows in session memory only), then **Generate metrics** to write `data/pcs_mayor_metrics.csv`. There is no download for a full raw export.
+Use **Pull from Smartsheet and generate metrics** (one button: fetch + build metrics; rows stay in session memory only). There is no download for a full raw export.
 
 ## Streamlit Community Cloud
 
@@ -56,7 +56,7 @@ Use **Pull data** (stores rows in session memory only), then **Generate metrics*
    SMARTSHEET_TOKEN = "your_token_here"
    ```
 
-4. Deploy. Use Pull → Generate in the app; only the metrics CSV is persisted under `data/` for that run.
+4. Deploy. Use the single **Pull from Smartsheet and generate metrics** action; only the metrics CSV is persisted under `data/` for that run.
 
 ## CLI (no UI)
 
