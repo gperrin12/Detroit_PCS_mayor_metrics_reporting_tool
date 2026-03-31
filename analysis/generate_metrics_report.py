@@ -1,7 +1,9 @@
 """
 Generate PCS Mayor Metrics report from Smartsheet export data.
 
-Reads full_export.csv and produces pcs_mayor_metrics.csv with per-year counts
+Builds pcs_mayor_metrics.csv from in-memory row data (preferred) or an optional
+local CSV for development. Full row-level exports are not written by the pull
+step to reduce PII exposure.
 for both distinct people and rows (cases).
 
 People are identified by a composite key of SID Number + Primary (full name)
@@ -15,16 +17,18 @@ Year attribution per metric:
   - Fallback chain when date is missing: sheet name year -> Created year
 
 Usage:
-    python -m analysis.generate_metrics_report
-    (from repo root)
+    python -m analysis.pull_smartsheet_report   # fetches, then builds metrics in memory
+    python -m analysis.generate_metrics_report --csv path/to/file.csv   # dev only
 """
 
+import argparse
 import re
+from pathlib import Path
+
 import pandas as pd
 
-from .paths import FULL_EXPORT_CSV, PCS_MAYOR_METRICS_CSV
+from .paths import PCS_MAYOR_METRICS_CSV
 
-INPUT_FILE = str(FULL_EXPORT_CSV)
 OUTPUT_FILE = str(PCS_MAYOR_METRICS_CSV)
 
 UNDER_REVIEW_SHEETS = [
@@ -60,8 +64,14 @@ def extract_sheet_year(sheet_name):
     return int(match.group(1)) if match else None
 
 
-def load_data(path):
-    df = pd.read_csv(path)
+def load_data(source):
+    """Load from CSV path, DataFrame, or list of row dicts (Smartsheet export shape)."""
+    if isinstance(source, pd.DataFrame):
+        df = source.copy()
+    elif isinstance(source, list):
+        df = pd.DataFrame(source)
+    else:
+        df = pd.read_csv(Path(source))
     df["Created"] = pd.to_datetime(df["Created"], errors="coerce")
     df["created_year"] = df["Created"].dt.year
 
@@ -183,8 +193,12 @@ def compute_metrics_for_year(year, created_grp, hearing_grp, close_grp,
     return m
 
 
-def main():
-    df = load_data(INPUT_FILE)
+def main(source=None):
+    if source is None:
+        raise ValueError(
+            "No data source. Pass row records from pull, or use --csv for local development."
+        )
+    df = load_data(source)
     print(f"Loaded {len(df):,} rows with {df['person_key'].nunique():,} unique people")
     print(f"Columns: {list(df.columns[:12])}")
 
@@ -248,10 +262,25 @@ def main():
     return result
 
 
-def run_generate_metrics():
-    """Build metrics table and return it as a DataFrame."""
-    return main()
+def run_generate_metrics(source):
+    """Build metrics table from row dicts, DataFrame, or path; return DataFrame."""
+    return main(source=source)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Build metrics CSV from a local CSV (development only)."
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        metavar="PATH",
+        help="Optional local CSV (not used in production; pull keeps data in memory).",
+    )
+    args = parser.parse_args()
+    if not args.csv:
+        parser.error(
+            "Pass --csv PATH for a local file, or run "
+            "`python -m analysis.pull_smartsheet_report` to fetch and generate metrics."
+        )
+    main(source=args.csv)

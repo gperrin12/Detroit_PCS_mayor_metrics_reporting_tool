@@ -14,7 +14,7 @@ import csv
 from collections import Counter
 from dotenv import load_dotenv
 
-from .paths import REPO_ROOT, ensure_data_dir, FULL_EXPORT_CSV, DEDUPED_ALL_YEARS_CSV
+from .paths import REPO_ROOT, ensure_data_dir, DEDUPED_ALL_YEARS_CSV
 
 load_dotenv(REPO_ROOT / ".env")
 
@@ -195,7 +195,11 @@ def analyze(records):
     return deduped
 
 def run_pull_data(token=None, report_id=None):
-    """Fetch report, export full CSV and deduped CSV. Returns (success, message)."""
+    """Fetch report, export deduped CSV only (no full row-level export — PII).
+
+    Returns (success, message, records_or_none). ``records`` is the full list of
+    row dicts for in-memory metrics generation; it is not written to disk.
+    """
     load_dotenv(REPO_ROOT / ".env")
     token = token or get_token()
     report_id = report_id or REPORT_ID
@@ -203,26 +207,30 @@ def run_pull_data(token=None, report_id=None):
 
     rows, column_map = fetch_report(token, report_id)
     if not rows:
-        return False, "No data returned. Check your token and report ID."
+        return False, "No data returned. Check your token and report ID.", None
 
     records = rows_to_dicts(rows, column_map)
-    export_to_csv(records, str(FULL_EXPORT_CSV))
     deduped = analyze(records)
     export_to_csv(deduped, str(DEDUPED_ALL_YEARS_CSV))
 
     msg = (
-        f"Exported {len(records):,} rows to {FULL_EXPORT_CSV.name}; "
-        f"{len(deduped):,} deduped rows to {DEDUPED_ALL_YEARS_CSV.name}"
+        f"Fetched {len(records):,} rows (not saved as full export). "
+        f"Exported {len(deduped):,} deduped rows to {DEDUPED_ALL_YEARS_CSV.name}."
     )
-    return True, msg
+    return True, msg, records
 
 
 def main():
     print(f"Fetching report {REPORT_ID}...")
-    ok, msg = run_pull_data()
+    ok, msg, records = run_pull_data()
     print(msg if ok else msg)
     if not ok:
         raise SystemExit(1)
+    if records:
+        from .generate_metrics_report import run_generate_metrics
+
+        run_generate_metrics(records)
+        print("Metrics CSV written.")
 
 
 if __name__ == "__main__":
