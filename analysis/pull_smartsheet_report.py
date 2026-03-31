@@ -2,8 +2,9 @@
 Pull data from SmartSheets Report via API, deduplicate, and get counts by year.
 
 Usage:
-    1. Add SMARTSHEET_TOKEN to .env file
-    2. python pull_smartsheet_report.py
+    1. Add SMARTSHEET_TOKEN to .env (repo root) or Streamlit secrets
+    2. python -m analysis.pull_smartsheet_report
+       (from repo root)
 """
 
 import os
@@ -13,7 +14,9 @@ import csv
 from collections import Counter
 from dotenv import load_dotenv
 
-load_dotenv()  # loads from .env file in the same directory
+from .paths import REPO_ROOT, ensure_data_dir, FULL_EXPORT_CSV, DEDUPED_ALL_YEARS_CSV
+
+load_dotenv(REPO_ROOT / ".env")
 
 REPORT_ID = "8843647500898180"
 
@@ -101,57 +104,49 @@ def export_to_csv(records, filename="smartsheet_export.csv"):
         writer.writerows(records)
     print(f"Exported {len(records)} rows to {filename}")
 
+def make_person_key(record):
+    """Build composite key from SID Number + Primary (full name).
+
+    Treats null and "BLANK" SID values the same so people without
+    a valid SID are still distinguished by name.
+    """
+    sid = record.get("SID Number") or ""
+    if sid == "BLANK":
+        sid = ""
+    name = record.get("Primary") or ""
+    return f"{sid}|{name}"
+
+
 def analyze(records):
-    """Deduplicate on SID Number, show counts by year."""
-    
-    # Find the right column names (they might vary)
+    """Deduplicate on person key (SID Number + Primary), show counts by year."""
+
     sample = records[0] if records else {}
     print(f"\nColumn names found: {list(sample.keys())}")
-    
-    # Try to find SID and date columns
-    sid_col = None
-    date_col = None
-    for col in sample.keys():
-        if "sid" in col.lower():
-            sid_col = col
-        if "created" in col.lower() or "date" in col.lower() or "registered" in col.lower():
-            if not date_col:  # take the first match
+
+    date_col = "Created"
+    if date_col not in sample:
+        for col in sample.keys():
+            if "created" in col.lower():
                 date_col = col
-    
-    print(f"Using SID column: {sid_col}")
+                break
     print(f"Using date column: {date_col}")
-    
-    if not sid_col:
-        print("\nCouldn't auto-detect SID column. Here are the columns:")
-        for i, col in enumerate(sample.keys()):
-            print(f"  {i}: {col} (sample value: {sample[col]})")
-        sid_col = input("Enter the SID column name: ").strip()
-    
-    if not date_col:
-        print("\nCouldn't auto-detect date column. Here are the columns:")
-        for i, col in enumerate(sample.keys()):
-            print(f"  {i}: {col} (sample value: {sample[col]})")
-        date_col = input("Enter the date column name: ").strip()
-    
-    # Extract year from date values
+
     def get_year(val):
         if val is None:
             return None
         val = str(val)
-        # Try common date formats
         for fmt in ["%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d"]:
             try:
                 from datetime import datetime
                 return datetime.strptime(val.split(" ")[0], fmt).year
-            except:
+            except Exception:
                 continue
-        # Last resort: look for a 4-digit year
         import re
         match = re.search(r"20\d{2}", val)
         if match:
             return int(match.group())
         return None
-    
+
     # --- All records (with dupes) ---
     print("\n" + "="*50)
     print("ALL RECORDS (before dedup)")
@@ -160,65 +155,75 @@ def analyze(records):
     for r in records:
         year = get_year(r.get(date_col))
         year_counts_all[year] += 1
-    
+
     for year in sorted(k for k in year_counts_all if k is not None):
         print(f"  {year}: {year_counts_all[year]:,}")
     if None in year_counts_all:
         print(f"  Unknown year: {year_counts_all[None]:,}")
     print(f"  TOTAL: {sum(year_counts_all.values()):,}")
-    
+
     # --- Deduplicated ---
     print("\n" + "="*50)
-    print("DEDUPLICATED (first occurrence per SID Number)")
+    print("DEDUPLICATED (first occurrence per person key)")
     print("="*50)
-    seen_sids = set()
+    seen_keys = set()
     deduped = []
     for r in records:
-        sid = r.get(sid_col)
-        if sid and sid not in seen_sids:
-            seen_sids.add(sid)
+        key = make_person_key(r)
+        if key not in seen_keys:
+            seen_keys.add(key)
             deduped.append(r)
-    
+
     year_counts_deduped = Counter()
     for r in deduped:
         year = get_year(r.get(date_col))
         year_counts_deduped[year] += 1
-    
+
     for year in sorted(k for k in year_counts_deduped if k is not None):
         print(f"  {year}: {year_counts_deduped[year]:,}")
     if None in year_counts_deduped:
         print(f"  Unknown year: {year_counts_deduped[None]:,}")
     print(f"  TOTAL: {sum(year_counts_deduped.values()):,}")
-    
+
     # --- 2026 specifically ---
     print("\n" + "="*50)
     print("2026 ONLY (deduplicated)")
     print("="*50)
     count_2026 = year_counts_deduped.get(2026, 0)
     print(f"  2026 deduplicated count: {count_2026:,}")
-    
+
     return deduped
 
-def main():
-    token = get_token()
-    
-    print(f"Fetching report {REPORT_ID}...")
-    rows, column_map = fetch_report(token, REPORT_ID)
-    
+def run_pull_data(token=None, report_id=None):
+    """Fetch report, export full CSV and deduped CSV. Returns (success, message)."""
+    load_dotenv(REPO_ROOT / ".env")
+    token = token or get_token()
+    report_id = report_id or REPORT_ID
+    ensure_data_dir()
+
+    rows, column_map = fetch_report(token, report_id)
     if not rows:
-        print("No data returned. Check your token and report ID.")
-        return
-    
+        return False, "No data returned. Check your token and report ID."
+
     records = rows_to_dicts(rows, column_map)
-    
-    # Export full dataset to CSV
-    export_to_csv(records, "full_export.csv")
-    
-    # Analyze and deduplicate
+    export_to_csv(records, str(FULL_EXPORT_CSV))
     deduped = analyze(records)
-    
-    # Export deduped dataset
-    export_to_csv(deduped, "deduped_all_years.csv")
+    export_to_csv(deduped, str(DEDUPED_ALL_YEARS_CSV))
+
+    msg = (
+        f"Exported {len(records):,} rows to {FULL_EXPORT_CSV.name}; "
+        f"{len(deduped):,} deduped rows to {DEDUPED_ALL_YEARS_CSV.name}"
+    )
+    return True, msg
+
+
+def main():
+    print(f"Fetching report {REPORT_ID}...")
+    ok, msg = run_pull_data()
+    print(msg if ok else msg)
+    if not ok:
+        raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()

@@ -83,6 +83,9 @@ celerybeat.pid
 # mypy
 .mypy_cache/
 
+# Streamlit local secrets (use App secrets on Streamlit Cloud)
+.streamlit/secrets.toml
+
 # IDE
 .vscode/
 .idea/
