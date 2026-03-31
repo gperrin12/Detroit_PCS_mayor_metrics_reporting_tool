@@ -10,11 +10,10 @@ Usage:
 import os
 import json
 import requests
-import csv
 from collections import Counter
 from dotenv import load_dotenv
 
-from .paths import REPO_ROOT, ensure_data_dir, DEDUPED_ALL_YEARS_CSV
+from .paths import REPO_ROOT, ensure_data_dir
 
 load_dotenv(REPO_ROOT / ".env")
 
@@ -90,19 +89,6 @@ def rows_to_dicts(rows, column_map):
             record[col_name] = cell.get("displayValue") or cell.get("value")
         records.append(record)
     return records
-
-def export_to_csv(records, filename="smartsheet_export.csv"):
-    """Export records to CSV."""
-    if not records:
-        print("No records to export.")
-        return
-    
-    fieldnames = list(records[0].keys())
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-    print(f"Exported {len(records)} rows to {filename}")
 
 def make_person_key(record):
     """Build composite key from SID Number + Primary (full name).
@@ -195,10 +181,11 @@ def analyze(records):
     return deduped
 
 def run_pull_data(token=None, report_id=None):
-    """Fetch report, export deduped CSV only (no full row-level export — PII).
+    """Fetch report; no row-level data written to disk (PII).
 
-    Returns (success, message, records_or_none). ``records`` is the full list of
-    row dicts for in-memory metrics generation; it is not written to disk.
+    Returns (success, message, records_or_none). ``records`` is used only in
+    memory for metrics. ``analyze()`` still prints dedup stats to the console
+    when run from the CLI.
     """
     load_dotenv(REPO_ROOT / ".env")
     token = token or get_token()
@@ -210,12 +197,11 @@ def run_pull_data(token=None, report_id=None):
         return False, "No data returned. Check your token and report ID.", None
 
     records = rows_to_dicts(rows, column_map)
-    deduped = analyze(records)
-    export_to_csv(deduped, str(DEDUPED_ALL_YEARS_CSV))
+    analyze(records)
 
     msg = (
-        f"Fetched {len(records):,} rows (not saved as full export). "
-        f"Exported {len(deduped):,} deduped rows to {DEDUPED_ALL_YEARS_CSV.name}."
+        f"Fetched {len(records):,} rows (not saved to disk). "
+        "Metrics step will write only the aggregated CSV."
     )
     return True, msg, records
 
