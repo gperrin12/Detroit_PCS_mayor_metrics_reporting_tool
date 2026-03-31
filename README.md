@@ -1,18 +1,17 @@
 # Detroit PCS Mayor Metrics Reporting Tool
 
-A reporting tool for Detroit PCS mayor metrics: pull a Smartsheet report, deduplicate, and export mayor metrics as CSV. Includes a **Streamlit** UI for local use and [Streamlit Community Cloud](https://streamlit.io/cloud).
+A reporting tool for Detroit PCS mayor metrics: pull a Smartsheet report, deduplicate, and export mayor metrics as CSV. **Full row-level data is not written to disk** (PII); metrics are built in memory after each pull. Includes a **Streamlit** UI for local use and [Streamlit Community Cloud](https://streamlit.io/cloud).
 
 ## Layout
 
 ```
 ├── streamlit_app.py      # Streamlit entrypoint (set this on Cloud)
 ├── requirements.txt
-├── data/                 # Exported CSVs (gitignored except .gitkeep)
-│   ├── full_export.csv
-│   ├── deduped_all_years.csv
-│   └── pcs_mayor_metrics.csv
+├── data/                 # Outputs (gitignored except .gitkeep)
+│   ├── deduped_all_years.csv   # optional deduped export from pull
+│   └── pcs_mayor_metrics.csv   # aggregated metrics only
 └── analysis/
-    ├── paths.py          # Shared paths to data/
+    ├── paths.py
     ├── pull_smartsheet_report.py
     └── generate_metrics_report.py
 ```
@@ -45,7 +44,7 @@ From the project root:
 streamlit run streamlit_app.py
 ```
 
-Use the buttons to pull data and generate metrics. CSVs are written under `data/`.
+Use **Pull data** (stores rows in session memory only), then **Generate metrics** to write `data/pcs_mayor_metrics.csv`. There is no download for a full raw export.
 
 ## Streamlit Community Cloud
 
@@ -57,18 +56,23 @@ Use the buttons to pull data and generate metrics. CSVs are written under `data/
    SMARTSHEET_TOKEN = "your_token_here"
    ```
 
-4. Deploy. Ephemeral filesystem: pull + generate work for the session; downloads use the in-memory file contents from `data/` during the app run.
+4. Deploy. Use Pull → Generate in the app; only the metrics CSV is persisted under `data/` for that run.
 
 ## CLI (no UI)
 
-Run from the **project root** so imports resolve:
+Run from the **project root**:
 
 ```bash
 python -m analysis.pull_smartsheet_report
-python -m analysis.generate_metrics_report
 ```
 
-The first command fetches the report and writes `data/full_export.csv` and `data/deduped_all_years.csv`. The second reads `data/full_export.csv` and writes `data/pcs_mayor_metrics.csv`.
+This fetches the report, writes `data/deduped_all_years.csv`, builds metrics **in memory**, and writes `data/pcs_mayor_metrics.csv`. It does **not** write a full row-level CSV.
+
+To build metrics from a **local CSV** (development only):
+
+```bash
+python -m analysis.generate_metrics_report --csv path/to/file.csv
+```
 
 ### Metrics overview
 
