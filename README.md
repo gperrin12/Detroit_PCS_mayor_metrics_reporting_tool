@@ -81,6 +81,7 @@ python -m analysis.generate_metrics_report --csv path/to/file.csv
 - **Registered** — unique people (composite key) and row counts by Created year
 - **Under Review / Open Files** — current pipeline snapshot on the latest year row only
 - **Expunged / Denied** — Hearing Date year (with fallbacks)
+- **Filed** — rows with **Filing Date** set (any sheet); year = that date’s calendar year; `filed_people` / `filed_rows`
 - **Closed–ineligible, No MI convictions, etc.** — Case Close Date year (with fallbacks)
 - **Expungement success rate** — expunged / (expunged + denied) by people count
 
