@@ -3,8 +3,7 @@ Generate PCS Mayor Metrics report from Smartsheet export data.
 
 Builds pcs_mayor_metrics.csv from in-memory row data (preferred) or an optional
 local CSV for development. Full row-level exports are not written by the pull
-step to reduce PII exposure.
-for both distinct people and rows (cases).
+step to reduce PII exposure. Metrics include distinct people and row (case) counts.
 
 People are identified by a composite key of SID Number + Primary (full name)
 to handle rows where SID is missing or "BLANK".
@@ -14,6 +13,7 @@ Year attribution per metric:
   - Expunged / Denied: Hearing Date year
   - Closed-Ineligible / No Michigan Convictions / No Client Response /
     Client Not Interested: Case Close Date year
+  - Filed: **Filing Date** year (any sheet; row counts when that date is set)
   - Fallback chain when date is missing: sheet name year -> Created year
 
 Usage:
@@ -48,6 +48,18 @@ OPEN_FILES_SHEETS = [
 ]
 
 DENIED_SHEETS = ["CM 9: Denied"]
+
+
+def resolve_filing_date_column(df):
+    """Return the Smartsheet column for filing date, or None."""
+    for col in df.columns:
+        if str(col).strip().lower() == "filing date":
+            return col
+    for col in df.columns:
+        lc = str(col).lower()
+        if "filing" in lc and "date" in lc:
+            return col
+    return None
 
 
 def extract_sheet_year(sheet_name):
@@ -102,6 +114,21 @@ def load_data(source):
     df["hearing_metric_year"] = df["hearing_year"].fillna(fallback).astype("Int64")
     df["close_metric_year"] = df["close_year"].fillna(fallback).astype("Int64")
 
+    filing_col = resolve_filing_date_column(df)
+    if filing_col is not None:
+        raw = df[filing_col]
+        try:
+            fd = pd.to_datetime(raw, errors="coerce", format="mixed")
+        except (ValueError, TypeError):
+            fd = pd.to_datetime(raw, errors="coerce")
+        df["filed_metric_year"] = fd.dt.year.astype("Int64")
+    else:
+        df["filed_metric_year"] = pd.NA
+        print(
+            "Warning: no 'Filing Date' column found — "
+            "filed_people / filed_rows will be empty."
+        )
+
     return df
 
 
@@ -114,7 +141,7 @@ def row_count(df):
     return len(df)
 
 
-def compute_metrics_for_year(year, created_grp, hearing_grp, close_grp,
+def compute_metrics_for_year(year, created_grp, hearing_grp, close_grp, filed_grp,
                              full_df=None):
     """Compute metrics using the appropriate year-grouped data for each metric.
 
@@ -156,6 +183,10 @@ def compute_metrics_for_year(year, created_grp, hearing_grp, close_grp,
     denied = hearing_grp[hearing_grp["Sheet Name"].isin(DENIED_SHEETS)]
     m["denied_people"] = people_count(denied)
     m["denied_rows"] = row_count(denied)
+
+    # Filing Date year (any sheet)
+    m["filed_people"] = people_count(filed_grp)
+    m["filed_rows"] = row_count(filed_grp)
 
     # Case Close Date year metrics
     closed_ineligible = close_grp[
@@ -208,11 +239,15 @@ def main(source=None):
     if "close_year" in df.columns:
         n = df["close_year"].notna().sum()
         print(f"Case Close Date populated: {n:,} / {len(df):,} rows")
+    if "filed_metric_year" in df.columns and df["filed_metric_year"].notna().any():
+        n = df["filed_metric_year"].notna().sum()
+        print(f"Filing Date (year usable): {n:,} / {len(df):,} rows")
 
     all_years = sorted(
         set(df["created_year"].dropna().astype(int))
         | set(df["hearing_metric_year"].dropna().astype(int))
         | set(df["close_metric_year"].dropna().astype(int))
+        | set(df["filed_metric_year"].dropna().astype(int))
     )
 
     latest_year = max(all_years)
@@ -223,9 +258,10 @@ def main(source=None):
         created_grp = df[df["created_year"] == year]
         hearing_grp = df[df["hearing_metric_year"] == year]
         close_grp = df[df["close_metric_year"] == year]
+        filed_grp = df[df["filed_metric_year"] == year]
         is_current = (year_int == latest_year)
         m = compute_metrics_for_year(
-            year_int, created_grp, hearing_grp, close_grp,
+            year_int, created_grp, hearing_grp, close_grp, filed_grp,
             full_df=df if is_current else None,
         )
         m["year"] = year_int
@@ -235,7 +271,10 @@ def main(source=None):
               + (f", under_review={m['under_review_rows']:,} (current pipeline)"
                  if is_current else ""))
 
-    totals = compute_metrics_for_year("Total", df, df, df, full_df=df)
+    filed_total_grp = df[df["filed_metric_year"].notna()]
+    totals = compute_metrics_for_year(
+        "Total", df, df, df, filed_total_grp, full_df=df,
+    )
     totals["year"] = "Total"
     rows.append(totals)
 
@@ -248,6 +287,7 @@ def main(source=None):
         "expunged_petition_people", "expunged_petition_rows",
         "expunged_auto_people", "expunged_auto_rows",
         "denied_people", "denied_rows",
+        "filed_people", "filed_rows",
         "closed_ineligible_people", "closed_ineligible_rows",
         "no_michigan_convictions_people", "no_michigan_convictions_rows",
         "no_client_response_people", "no_client_response_rows",
