@@ -15,6 +15,7 @@ Year attribution per metric:
     Client Not Interested: Case Close Date year
   - Filed: **Filing Date** year (any sheet; row counts when that date is set)
   - Fallback chain when date is missing: sheet name year -> Created year
+  - Year columns are clipped to 2016–2035 so bad parses (e.g. 1360, 1451) never appear.
 
 Usage:
     python -m analysis.pull_smartsheet_report   # fetches, then builds metrics in memory
@@ -30,6 +31,10 @@ import pandas as pd
 from .paths import PCS_MAYOR_METRICS_CSV
 
 OUTPUT_FILE = str(PCS_MAYOR_METRICS_CSV)
+
+# Plausible calendar years for PCS mayor metrics (drops bad parses e.g. 1360, 1451).
+REPORT_YEAR_MIN = 2016
+REPORT_YEAR_MAX = 2035
 
 UNDER_REVIEW_SHEETS = [
     "CM 0: Eligibility Review",
@@ -60,6 +65,27 @@ def resolve_filing_date_column(df):
         if "filing" in lc and "date" in lc:
             return col
     return None
+
+
+def _invalidate_out_of_range_years(df):
+    """Clear year values outside REPORT_YEAR_MIN..MAX (bad dates / junk)."""
+    for col in (
+        "created_year",
+        "hearing_metric_year",
+        "close_metric_year",
+        "filed_metric_year",
+    ):
+        if col not in df.columns:
+            continue
+        s = df[col]
+        bad = s.notna() & ((s < REPORT_YEAR_MIN) | (s > REPORT_YEAR_MAX))
+        n_bad = int(bad.sum())
+        if n_bad:
+            df.loc[bad, col] = pd.NA
+            print(
+                f"Note: cleared {n_bad} out-of-range {col} values "
+                f"(kept {REPORT_YEAR_MIN}–{REPORT_YEAR_MAX} only)."
+            )
 
 
 def extract_sheet_year(sheet_name):
@@ -128,6 +154,8 @@ def load_data(source):
             "Warning: no 'Filing Date' column found — "
             "filed_people / filed_rows will be empty."
         )
+
+    _invalidate_out_of_range_years(df)
 
     return df
 
@@ -250,7 +278,12 @@ def main(source=None):
         | set(df["filed_metric_year"].dropna().astype(int))
     )
 
-    latest_year = max(all_years)
+    if not all_years:
+        print(
+            "No in-range years (2016–2035) after sanitization; per-year rows omitted; "
+            "totals row only."
+        )
+    latest_year = max(all_years) if all_years else None
 
     rows = []
     for year in all_years:
@@ -259,7 +292,7 @@ def main(source=None):
         hearing_grp = df[df["hearing_metric_year"] == year]
         close_grp = df[df["close_metric_year"] == year]
         filed_grp = df[df["filed_metric_year"] == year]
-        is_current = (year_int == latest_year)
+        is_current = latest_year is not None and (year_int == latest_year)
         m = compute_metrics_for_year(
             year_int, created_grp, hearing_grp, close_grp, filed_grp,
             full_df=df if is_current else None,
